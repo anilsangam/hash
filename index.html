@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecureHash dApp</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+    <h1>SecureHash dApp</h1>
+    <button id="connectButton">Connect MetaMask</button>
+    <div id="app" style="display: none;">
+        <h2>Store Hash</h2>
+        <input type="text" id="dataInput" placeholder="Enter data to hash">
+        <input type="text" id="descInput" placeholder="Description">
+        <button id="storeButton">Store Hash</button>
+
+        <h2>Verify Hash</h2>
+        <input type="text" id="hashIdInput" placeholder="Hash ID">
+        <input type="text" id="verifyDataInput" placeholder="Data to verify">
+        <button id="verifyButton">Verify Hash</button>
+        <p id="verifyResult"></p>
+
+        <h2>My Hashes</h2>
+        <div id="userHashes"></div>
+    </div>
+    <p id="status">Not connected</p>
+
+    <script>
+        // Contract ABI (copy from Remix after compiling)
+        const contractABI = [
+            {
+                "inputs": [
+                    {"internalType": "string", "name": "_data", "type": "string"},
+                    {"internalType": "string", "name": "_description", "type": "string"}
+                ],
+                "name": "storeHash",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [
+                    {"internalType": "uint256", "name": "_hashId", "type": "uint256"},
+                    {"internalType": "string", "name": "_data", "type": "string"}
+                ],
+                "name": "verifyHash",
+                "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [{"internalType": "uint256", "name": "_hashId", "type": "uint256"}],
+                "name": "deactivateHash",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [{"internalType": "uint256", "name": "_hashId", "type": "uint256"}],
+                "name": "getHashDetails",
+                "outputs": [
+                    {"internalType": "address", "name": "creator", "type": "address"},
+                    {"internalType": "uint256", "name": "timestamp", "type": "uint256"},
+                    {"internalType": "string", "name": "description", "type": "string"},
+                    {"internalType": "bool", "name": "isActive", "type": "bool"}
+                ],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [{"internalType": "address", "name": "_user", "type": "address"}],
+                "name": "getUserHashes",
+                "outputs": [{"internalType": "uint256[]", "name": "", "type": "uint256[]"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "getTotalHashes",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+
+        // Replace with your deployed contract address
+        const contractAddress = "0x6993bEe581c48f15Fb3b4e325B19F42209162406";
+        let provider;
+        let signer;
+        let contract;
+
+        // Connect to MetaMask
+        async function connectMetaMask() {
+            if (window.ethereum) {
+                try {
+                    await window.ethereum.request({ method: "eth_requestAccounts" });
+                    provider = new ethers.providers.Web3Provider(window.ethereum);
+                    signer = provider.getSigner();
+                    contract = new ethers.Contract(contractAddress, contractABI, signer);
+                    document.getElementById("status").textContent = "Connected to MetaMask";
+                    document.getElementById("connectButton").style.display = "none";
+                    document.getElementById("app").style.display = "block";
+                    await loadUserHashes();
+                } catch (error) {
+                    console.error(error);
+                    document.getElementById("status").textContent = "Failed to connect";
+                }
+            } else {
+                document.getElementById("status").textContent = "MetaMask not installed!";
+            }
+        }
+
+        // Store a new hash
+        async function storeHash() {
+            const data = document.getElementById("dataInput").value;
+            const desc = document.getElementById("descInput").value;
+            if (!data || !desc) {
+                alert("Please enter data and description!");
+                return;
+            }
+            try {
+                const tx = await contract.storeHash(data, desc);
+                document.getElementById("status").textContent = "Storing hash... waiting for confirmation";
+                await tx.wait();
+                document.getElementById("status").textContent = "Hash stored successfully!";
+                document.getElementById("dataInput").value = "";
+                document.getElementById("descInput").value = "";
+                await loadUserHashes();
+            } catch (error) {
+                console.error(error);
+                document.getElementById("status").textContent = "Failed to store hash";
+            }
+        }
+
+        // Verify a hash
+        async function verifyHash() {
+            const hashId = document.getElementById("hashIdInput").value;
+            const data = document.getElementById("verifyDataInput").value;
+            if (!hashId || !data) {
+                alert("Please enter hash ID and data!");
+                return;
+            }
+            try {
+                const isValid = await contract.verifyHash(hashId, data);
+                document.getElementById("verifyResult").textContent =
+                    `Verification result: ${isValid ? "✅ Match!" : "❌ No match!"}`;
+            } catch (error) {
+                console.error(error);
+                document.getElementById("verifyResult").textContent = "Verification failed";
+            }
+        }
+
+        // Load user's hashes
+        async function loadUserHashes() {
+            const userAddress = await signer.getAddress();
+            const hashIds = await contract.getUserHashes(userAddress);
+            const hashesDiv = document.getElementById("userHashes");
+            hashesDiv.innerHTML = "<h3>Your Hashes:</h3>";
+            if (hashIds.length === 0) {
+                hashesDiv.innerHTML += "<p>No hashes stored yet.</p>";
+                return;
+            }
+            for (const hashId of hashIds) {
+                const details = await contract.getHashDetails(hashId);
+                hashesDiv.innerHTML += `
+                    <div>
+                        <p><strong>Hash ID:</strong> ${hashId}</p>
+                        <p><strong>Description:</strong> ${details[2]}</p>
+                        <p><strong>Status:</strong> ${details[3] ? "Active" : "Deactivated"}</p>
+                        <button onclick="deactivateHash(${hashId})" ${details[3] ? "" : "disabled"}>
+                            Deactivate
+                        </button>
+                    </div>
+                    <hr>
+                `;
+            }
+        }
+
+        // Deactivate a hash
+        async function deactivateHash(hashId) {
+            try {
+                const tx = await contract.deactivateHash(hashId);
+                await tx.wait();
+                document.getElementById("status").textContent = `Hash ${hashId} deactivated!`;
+                await loadUserHashes();
+            } catch (error) {
+                console.error(error);
+                document.getElementById("status").textContent = "Failed to deactivate hash";
+            }
+        }
+
+        // Event listeners
+        document.getElementById("connectButton").addEventListener("click", connectMetaMask);
+        document.getElementById("storeButton").addEventListener("click", storeHash);
+        document.getElementById("verifyButton").addEventListener("click", verifyHash);
+    </script>
+</body>
+</html>
